@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/ip_icmp.h>
+#include <sys/time.h>
 
 using namespace std;
 
@@ -50,7 +51,23 @@ int main(int argc, char *argv[]) {
     setsockopt(sockfd, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl));
     sendto(sockfd, &icmp_hdr, sizeof(icmp_hdr), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
     
-    cout << "ICMP request sent to " << argv[1] << " with TTL = " << ttl << endl;
+    struct sockaddr_in recv_addr;
+    socklen_t addr_len = sizeof(recv_addr);
+    char recv_buf[512];
+    
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(sockfd, &readfds);
+    struct timeval timeout = {1, 0};
+
+    cout << "Waiting for ICMP reply..." << endl;
+    if (select(sockfd + 1, &readfds, NULL, NULL, &timeout) > 0) {
+        recvfrom(sockfd, recv_buf, sizeof(recv_buf), 0, (struct sockaddr *)&recv_addr, &addr_len);
+        cout << "ICMP reply received!" << endl;
+    } else {
+        cout << "Request timed out." << endl;
+    }
+    
     close(sockfd);
     return 0;
-}   
+}
