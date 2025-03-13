@@ -7,6 +7,9 @@
 #include <netinet/ip_icmp.h>
 #include <sys/time.h>
 
+#define MAX_HOPS 30
+#define TIMEOUT_SEC 1
+
 using namespace std;
 
 unsigned short checksum(void *b, int len) {
@@ -24,12 +27,7 @@ unsigned short checksum(void *b, int len) {
     return result;
 }
 
-int main(int argc, char *argv[]) {
-    if (argc != 2) {
-        cerr << "Usage: " << argv[0] << " <IP>" << endl;
-        return 1;
-    }
-
+void traceroute(const char *target) {
     int sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
     if (sockfd < 0) {
         perror("Socket error");
@@ -39,35 +37,32 @@ int main(int argc, char *argv[]) {
     struct sockaddr_in dest_addr;
     memset(&dest_addr, 0, sizeof(dest_addr));
     dest_addr.sin_family = AF_INET;
-    inet_pton(AF_INET, argv[1], &dest_addr.sin_addr);
+    inet_pton(AF_INET, target, &dest_addr.sin_addr);
 
-    struct icmphdr icmp_hdr;
-    memset(&icmp_hdr, 0, sizeof(icmp_hdr));
-    icmp_hdr.type = ICMP_ECHO;
-    icmp_hdr.un.echo.id = getpid();
-    icmp_hdr.checksum = checksum(&icmp_hdr, sizeof(icmp_hdr));
+    cout << "Traceroute to " << target << " with max hops " << MAX_HOPS << endl;
 
-    int ttl = 1;
-    setsockopt(sockfd, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl));
-    sendto(sockfd, &icmp_hdr, sizeof(icmp_hdr), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-    
-    struct sockaddr_in recv_addr;
-    socklen_t addr_len = sizeof(recv_addr);
-    char recv_buf[512];
-    
-    fd_set readfds;
-    FD_ZERO(&readfds);
-    FD_SET(sockfd, &readfds);
-    struct timeval timeout = {1, 0};
+    for (int ttl = 1; ttl <= MAX_HOPS; ttl++) {
+        setsockopt(sockfd, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl));
 
-    cout << "Waiting for ICMP reply..." << endl;
-    if (select(sockfd + 1, &readfds, NULL, NULL, &timeout) > 0) {
-        recvfrom(sockfd, recv_buf, sizeof(recv_buf), 0, (struct sockaddr *)&recv_addr, &addr_len);
-        cout << "ICMP reply received!" << endl;
-    } else {
-        cout << "Request timed out." << endl;
+        struct icmphdr icmp_hdr;
+        memset(&icmp_hdr, 0, sizeof(icmp_hdr));
+        icmp_hdr.type = ICMP_ECHO;
+        icmp_hdr.un.echo.id = getpid();
+        icmp_hdr.un.echo.sequence = ttl;
+        icmp_hdr.checksum = checksum(&icmp_hdr, sizeof(icmp_hdr));
+
+        sendto(sockfd, &icmp_hdr, sizeof(icmp_hdr), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+
+        cout << "Sent ICMP packet with TTL = " << ttl << endl;
     }
-    
     close(sockfd);
+}
+
+int main(int argc, char *argv[]) {
+    if (argc != 2) {
+        cerr << "Usage: " << argv[0] << " <IP>" << endl;
+        return 1;
+    }
+    traceroute(argv[1]);
     return 0;
 }
