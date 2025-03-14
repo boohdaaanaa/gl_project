@@ -3,9 +3,10 @@
 #include <cstring>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <sys/socket.h>
 #include <netinet/ip_icmp.h>
+#include <sys/socket.h>
 #include <sys/time.h>
+#include <netdb.h>
 
 #define MAX_HOPS 30
 #define TIMEOUT_SEC 1
@@ -51,16 +52,32 @@ void traceroute(const char *target) {
         icmp_hdr.un.echo.sequence = ttl;
         icmp_hdr.checksum = checksum(&icmp_hdr, sizeof(icmp_hdr));
 
+        struct sockaddr_in recv_addr;
+        socklen_t addr_len = sizeof(recv_addr);
+        char recv_buf[512];
+
         sendto(sockfd, &icmp_hdr, sizeof(icmp_hdr), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
 
-        cout << "Sent ICMP packet with TTL = " << ttl << endl;
+        fd_set readfds;
+        FD_ZERO(&readfds);
+        FD_SET(sockfd, &readfds);
+        struct timeval timeout = {TIMEOUT_SEC, 0};
+
+        if (select(sockfd + 1, &readfds, NULL, NULL, &timeout) > 0) {
+            recvfrom(sockfd, recv_buf, sizeof(recv_buf), 0, (struct sockaddr *)&recv_addr, &addr_len);
+            char ip_str[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &recv_addr.sin_addr, ip_str, sizeof(ip_str));
+            cout << ttl << " \t " << ip_str << endl;
+        } else {
+            cout << ttl << " \t *" << endl;
+        }
     }
     close(sockfd);
 }
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-        cerr << "Usage: " << argv[0] << " <IP>" << endl;
+        cerr << "Usage: " << argv[0] << " <IP/hostname>" << endl;
         return 1;
     }
     traceroute(argv[1]);
