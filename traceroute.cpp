@@ -1,4 +1,5 @@
 #include <iostream>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <unistd.h>
@@ -30,7 +31,7 @@ unsigned short checksum(void *b, int len) {
 
 void traceroute(const char *target) {
     int sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-    if (sockfd < 0) {
+       if (sockfd < 0) {
         perror("Socket error");
         exit(1);
     }
@@ -54,20 +55,54 @@ void traceroute(const char *target) {
 
         struct sockaddr_in recv_addr;
         socklen_t addr_len = sizeof(recv_addr);
-        char recv_buf[512];
+        struct timeval start, end;
+        gettimeofday(&start, NULL);
 
-        sendto(sockfd, &icmp_hdr, sizeof(icmp_hdr), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+        cout << "Setting TTL to " << ttl << endl;
+        if (sendto(sockfd, &icmp_hdr, sizeof(icmp_hdr), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) < 0) {
+            perror("sendto error");
+            continue;
+        }
 
         fd_set readfds;
         FD_ZERO(&readfds);
         FD_SET(sockfd, &readfds);
         struct timeval timeout = {TIMEOUT_SEC, 0};
 
+        cout << "Waiting for ICMP reply for TTL = " << ttl << endl;
         if (select(sockfd + 1, &readfds, NULL, NULL, &timeout) > 0) {
-            recvfrom(sockfd, recv_buf, sizeof(recv_buf), 0, (struct sockaddr *)&recv_addr, &addr_len);
+            char recv_buf[512];
+            int bytes_received = recvfrom(sockfd, recv_buf, sizeof(recv_buf), 0, (struct sockaddr *)&recv_addr, &addr_len);
+            if (bytes_received < 0) {
+                perror("recvfrom error");
+                continue;
+            }
+
+            gettimeofday(&end, NULL);
+            double rtt = (end.tv_sec - start.tv_sec) * 1000.0 + (end.tv_usec - start.tv_usec) / 1000.0;
+
+            struct iphdr *ip_hdr = (struct iphdr *)recv_buf;
+            struct icmphdr *icmp_hdr_reply = (struct icmphdr *)(recv_buf + (ip_hdr->ihl * 4));
+
             char ip_str[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &recv_addr.sin_addr, ip_str, sizeof(ip_str));
-            cout << ttl << " \t " << ip_str << endl;
+
+            struct hostent *host = gethostbyaddr(&recv_addr.sin_addr, sizeof(recv_addr.sin_addr), AF_INET);
+
+            cout << ttl << " \t " << ip_str;
+            if (host) {
+                cout << " (" << host->h_name << ")";
+            }
+            cout << " \t " << rtt << " ms" << endl;
+
+            cout << "Received response from " << ip_str << ", type: " << (int)icmp_hdr_reply->type << endl;
+
+
+            if (icmp_hdr_reply->type == ICMP_ECHOREPLY) {
+                break;
+            } else if (icmp_hdr_reply->type == ICMP_TIME_EXCEEDED) {
+                continue;
+            }
         } else {
             cout << ttl << " \t *" << endl;
         }
@@ -83,3 +118,4 @@ int main(int argc, char *argv[]) {
     traceroute(argv[1]);
     return 0;
 }
+
